@@ -12,7 +12,7 @@ RF24 radio(9,10);
 
 byte addresses[][6] = {"1Node","2Node"};
 
-#define BUFFER_SIZE 128
+#define BUFFER_SIZE 127
 
 typedef enum color {
   none,
@@ -31,8 +31,8 @@ int ledR = 22;
 // 0 means end of array
 
 typedef struct RX_Sequence {
+  uint8_t len;
   byte sequence[BUFFER_SIZE];
-  int length;
 };
 
 RX_Sequence sequence;
@@ -54,14 +54,14 @@ void setup() {
   pinMode(13, OUTPUT);
   // 0 the sequence buffer
   memset(&sequence, 0, sizeof(sequence));
-  sequence.length = 0;
+  sequence.len = 0;
 
   setColorHigh(ledR);
 
   Serial.print("before radio begin");
   
   radio.begin();
-  radio.setPALevel(RF24_PA_LOW);
+//  radio.setPALevel(RF24_PA_LOW);
   radio.setChannel(11);
   radio.printDetails();
   
@@ -72,19 +72,20 @@ void setup() {
   // Start the radio listening for data
   Serial.print("before radio startlistening");
   radio.startListening();
-  delay(10);
+  delay(7000);
+  radio.printDetails();
 
 
 }
 
-int addColor(RX_Sequence sequence) {
-  if (sequence.length > BUFFER_SIZE) {
+int addColor(RX_Sequence& sequence) {
+  if (sequence.len > BUFFER_SIZE) {
     return 1; // cant hold the entire sequence in memory
   }
 
-  sequence.sequence[sequence.length] = random(1, 4); // (yellow, green, red)
+  sequence.sequence[sequence.len] = random(1, 4); // (yellow, green, red)
 
-  sequence.length += 1;
+  sequence.len += 1;
   return 0;
 }
 void setColor(byte color, bool highOrLow) {
@@ -123,7 +124,7 @@ void setAllLow() {
 void displaySequence(RX_Sequence sequence) {
   setAllLow();
   int i;
-  for (i = 0; i < sequence.length; i++) {
+  for (i = 0; i < sequence.len; i++) {
     setColorHigh(sequence.sequence[i]);
     delay(COLOR_DURATION);
 
@@ -153,26 +154,30 @@ void displayCorrectness(bool correct) {
 
 // the loop routine runs over and over again forever:
 void loop() {
-  
   if (addColor(sequence)) {
-    // this is an error, but we dont care
+    Serial.print("addColor error");
+    
   }
-  for (int i = 0; i < sequence.length; i++){
+  Serial.print("The sequence is ");
+  for (int i = 0; i < sequence.len; i++){
     Serial.print(sequence.sequence[i]);
   }
   Serial.println("");
+  Serial.print("The length is ");
+  Serial.println(sequence.len);
+  Serial.print("RX_Sequence length is ");
+  Serial.print(sizeof(RX_Sequence));
   displaySequence(sequence);
-
   radio.stopListening();
+  Serial.println(" waiting to write");
   radio.write(&sequence, sizeof(RX_Sequence));
 
-
   // will be high when waiting for a response
+  radio.startListening();
   digitalWrite(13, HIGH);
-  byte correctSequence = -1;
-  while (sequence.length == 0) {
-  }
-  while (correctSequence == -1) {
+  byte correctSequence = 3;
+  Serial.println("before loop");
+  while (correctSequence == 3) {
     if (radio.available()) {
       radio.read(&correctSequence, sizeof(byte));
     }
@@ -182,8 +187,9 @@ void loop() {
   
   displayCorrectness(correctSequence);
 
-  if (correctSequence == 0) {
+  if (correctSequence != 1) {
     memset(&sequence, 0, sizeof(RX_Sequence));
+    sequence.len = 0;
   }
 
   delay(1);        // delay in between reads for stability
