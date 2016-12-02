@@ -21,6 +21,12 @@ typedef enum color {
   red
 };
 
+typedef enum Battery_Level {
+  bt_low,
+  bt_medium,
+  bt_high
+};
+
 typedef enum btnPrs {
   b_none,
   b_left,
@@ -29,7 +35,7 @@ typedef enum btnPrs {
 
 typedef struct TransmissionStruct {
   char button_press;
-  double battery_voltage;
+  char battery_level;
   int16_t a_x;
   int16_t a_y;
   int16_t a_z;
@@ -151,20 +157,45 @@ void displaySequence(RX_Sequence sequence) {
   }
 }
 
-void displayBatteryLevel(double battery_voltage) {
+
+void displayBatteryLevel(char battery_level) {
   setAllLow();
   color showColor;
-  if (battery_voltage >= 3.9) {
+  if (battery_level == bt_high) {
     showColor = green;
-  } else if (battery_voltage >= 3.7) {
+  } else if (battery_level == bt_medium) {
     showColor = yellow;
-  } else {
+  } else if (battery_level == bt_low) {
     showColor = red;
   }
 
   setColorHigh(showColor);
 }
 
+void printPacket(TransmissionStruct packet) {
+  
+  Serial.print("Button: ");
+  Serial.print((int) packet.button_press);
+
+  Serial.print("; Battery: ");
+  Serial.print((int) packet.battery_level);
+
+  Serial.print("; Accel: ");
+  Serial.print(packet.a_x); 
+  Serial.print(", ");
+  Serial.print(packet.a_y); 
+  Serial.print(", ");
+  Serial.print(packet.a_z); 
+
+  Serial.print("; Gyro: ");
+  Serial.print(packet.g_x); 
+  Serial.print(", ");
+  Serial.print(packet.g_y); 
+  Serial.print(", ");
+  Serial.print(packet.g_z); 
+
+  Serial.println("");
+}
 
 // the loop routine runs over and over again forever:
 void loop() {
@@ -183,12 +214,10 @@ void loop() {
       radio.read(&packet, sizeof(TransmissionStruct));
     }
   }
+  printPacket(packet);
 
 
   digitalWrite(13, LOW);
-
-  printf("Button press: %d, Battery Voltage: %f\n", packet.button_press, packet.battery_voltage);
-  displayBatteryLevel(packet.battery_voltage);
 
 
 

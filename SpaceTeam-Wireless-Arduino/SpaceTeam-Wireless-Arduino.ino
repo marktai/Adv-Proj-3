@@ -8,7 +8,7 @@
 #include "printf.h"
 #define DEBOUNCE_CONSTANT 10
 #define BUFFER_SIZE 128
-#define MPUAddr 1
+#define MPUAddr 0x68
 
 #include <SPI.h>
 #include "RF24.h"
@@ -42,9 +42,16 @@ typedef enum btnPrs {
   right
 };
 
+typedef enum Battery_Level {
+  bt_low,
+  bt_medium,
+  bt_high
+};
+
+
 typedef struct TransmissionStruct {
   char button_press;
-  double battery_voltage;
+  char battery_level;
   int16_t a_x;
   int16_t a_y;
   int16_t a_z;
@@ -86,6 +93,8 @@ void setSleep(bool enable) {
   Wire.endTransmission(false);
   Wire.requestFrom(MPUAddr, 1, true);
   uint8_t power = Wire.read(); // read 0x6B
+  Serial.print("Power byte: ");
+  Serial.println(power);
   power &= ~(1 << 6);
   power |= (power ? 1 : 0) << 6;
 
@@ -98,29 +107,28 @@ void setSleep(bool enable) {
 void read3_16Bits( int a_h, int16_t* ax, int b_h, int16_t* bx, int c_h, int16_t* cx) {
 
   for (int j = 0; j < 3; j++) {
-    for (int i = 0; i < 2; i++) {
 
-      int address;
-      int16_t* value;
+    int address;
+    int16_t* value;
 
-      if (j == 0) {
-        address = a_h;
-        value = ax;
-      } else if (j == 1) {
-        address = b_h;
-        value = bx;
-      } else if (j == 2) {
-        address = c_h;
-        value = cx;
-      }
-
-      Wire.beginTransmission(MPUAddr);
-      Wire.write(address + i);
-      bool lastTransmission = (i == 1 && j == 2);
-      Wire.endTransmission(lastTransmission);
-      Wire.requestFrom(MPUAddr, 1, true);
-      *(((int8_t *) value) + i) = Wire.read(); // read 0x6B
+    if (j == 0) {
+      address = a_h;
+      value = ax;
+    } else if (j == 1) {
+      address = b_h;
+      value = bx;
+    } else if (j == 2) {
+      address = c_h;
+      value = cx;
     }
+
+    Wire.beginTransmission(MPUAddr);
+    Wire.write(address);
+    bool lastTransmission = (j == 2);
+    Wire.endTransmission(true);
+    Wire.requestFrom(MPUAddr, 2, lastTransmission);
+    int16_t readValue = Wire.read() << 8 | Wire.read(); // read 0x6B
+    *value = readValue;
   }
 }
 
@@ -153,12 +161,14 @@ void setGyroPrec(gyro_precision_e prec) {
 // This function needs to set the precision bits for the accelerometer to val (refer to the lecture slides)
 void setAccelPrec(accel_precision_e prec) {
   Wire.beginTransmission(MPUAddr);
-  Wire.write(0x6B);
+  Wire.write(0x1C);
   Wire.endTransmission(false);
   Wire.requestFrom(MPUAddr, 1, true);
   uint8_t accel_config = Wire.read(); // read 0x6B
   accel_config &= ~(0b11 << 3);
   accel_config |= (0b11 & prec) << 3;
+  Serial.print("accel_config: ");
+  Serial.println(accel_config);
 
   Wire.beginTransmission(MPUAddr);
   Wire.write(0x1C);
@@ -166,11 +176,6 @@ void setAccelPrec(accel_precision_e prec) {
   Wire.endTransmission(true);
 
 }
-
-
-
-
-
 
 
 // the setup routine runs once when you press reset:
@@ -205,6 +210,10 @@ void setup() {
   // Start the radio listening for data
   radio.startListening();
 
+  setSleep(false);
+  setGyroPrec(GYRO_PREC_1000);
+  setAccelPrec(ACCEL_PREC_2);
+  
   delay(10);
 
 }
@@ -266,13 +275,24 @@ btnPrs parseInput() {
   return none;
 }
 
+
+char convertBatteryLevel(double battery_voltage) {
+  if (battery_voltage >= 3.9) {
+    return bt_high;
+  } else if (battery_voltage >= 3.7) {
+    return bt_medium;
+  } else {
+    return bt_low;
+  }
+}
+
 void printPacket(TransmissionStruct packet) {
   
   Serial.print("Button: ");
-  Serial.print(packet.button_press);
+  Serial.print((int) packet.button_press);
 
   Serial.print("; Battery: ");
-  Serial.print(packet.battery_voltage);
+  Serial.print((int) packet.battery_level);
 
   Serial.print("; Accel: ");
   Serial.print(packet.a_x); 
@@ -290,8 +310,6 @@ void printPacket(TransmissionStruct packet) {
 
   Serial.println("");
 }
-}
-
 // the loop routine runs over and over again forever:
 void loop() {
 
@@ -299,39 +317,24 @@ void loop() {
   double vOut = analogRead(battery_pin)*logic_level/1023;
   double vBattery = vOut*(r1+r2)/r2;
 
-  // read the input pin:
-  //int currentState = parseInput();
-  // print out the state of the button:
-  //Serial.print(digitalRead(pBY));
 
+  digitalWrite(13, HIGH);
 
-  // will be high when waiting for a sequence
-  // digitalWrite(13, HIGH);
-  // sequence.length = 0;
-  
-  // Serial.println("waiting for input");
-  // while (sequence.length == 0) {
-  //   if (radio.available()) {
-  //     radio.read(&sequence, sizeof(RX_Sequence));
-  //   }
-  // }
-
-  // // will be low when waiting for a button press (but will turn on for registered button presses)
-  // digitalWrite(13, LOW);
-
-  // digitalWrite(13, HIGH);
-  
+  memset(&packet, 0, sizeof(packet));
   packet.button_press = parseInput();
-  packet.battery_voltage = vBattery; 
+  packet.battery_level = convertBatteryLevel(vBattery); 
 
-  getAccelData(packet.a_x, packet.a_y, packet.a_z);
-  getGyroData(packet.g_x, packet.g_y, packet.g_z);
+  getAccelData(&packet.a_x, &packet.a_y, &packet.a_z);
+  getGyroData(&packet.g_x, &packet.g_y, &packet.g_z);
 
   printPacket(packet);
 
 
+  digitalWrite(13, LOW);
   radio.stopListening();    
-  radio.write(&packet, sizeof(TransmissionStruct));  radio.startListening();
+  radio.write(&packet, sizeof(TransmissionStruct));
+  radio.startListening();
+  delay(200);
 }
 
 
