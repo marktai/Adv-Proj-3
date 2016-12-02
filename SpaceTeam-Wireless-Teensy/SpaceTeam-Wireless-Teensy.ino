@@ -28,8 +28,14 @@ typedef enum btnPrs {
 };
 
 typedef struct TransmissionStruct {
-  int button_press;
+  char button_press;
   double battery_voltage;
+  int16_t a_x;
+  int16_t a_y;
+  int16_t a_z;
+  int16_t g_x;
+  int16_t g_y;
+  int16_t g_z;
 };
 
 
@@ -72,7 +78,6 @@ void setup() {
 
   setColorHigh(ledR);
 
-  Serial.print("before radio begin");
   
   radio.begin();
 //  radio.setPALevel(RF24_PA_LOW);
@@ -84,7 +89,6 @@ void setup() {
   radio.openReadingPipe(1,addresses[0]);
   
   // Start the radio listening for data
-  Serial.print("before radio startlistening");
   radio.startListening();
   delay(7000);
   radio.printDetails();
@@ -173,7 +177,7 @@ void loop() {
   radio.startListening();
   digitalWrite(13, HIGH);
   packet.button_press = 5;
-  Serial.println("before loop");
+  printf("Waiting for input\n");
   while (packet.button_press == 5) {
     if (radio.available()) {
       radio.read(&packet, sizeof(TransmissionStruct));
@@ -183,7 +187,7 @@ void loop() {
 
   digitalWrite(13, LOW);
 
-  printf("Button press: %d, Battery Voltage: %f", packet.button_press, packet.battery_voltage);
+  printf("Button press: %d, Battery Voltage: %f\n", packet.button_press, packet.battery_voltage);
   displayBatteryLevel(packet.battery_voltage);
 
 
