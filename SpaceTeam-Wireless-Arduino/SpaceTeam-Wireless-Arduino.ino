@@ -11,6 +11,16 @@
 
 #include <SPI.h>
 #include "RF24.h"
+#include <Wire.h>
+
+
+int battery_pin = A1;
+
+#define r1 326
+#define r2 1176
+
+#define logic_level 3.486
+
 
 
 /* Hardware configuration: Set up nRF24L01 radio on SPI bus plus pins 7 & 8 */
@@ -19,54 +29,152 @@ RF24 radio(9,10);
 
 byte addresses[][6] = {"1Node","2Node"};
 
-typedef enum color {
-  none,
-  yellow,
-  green,
-  red
-};
-
-
 // digital pin 2 has a pushbutton attached to it. Give it a name:
-int pBY = 4;
-int pBG = 6;
-int pBR = 8;
-
-int rX_Ard = 11;
-int tX_Ard = 10;
+int button_left = 4;
+int button_right = 6;
 
 
 
-typedef struct RX_Sequence {
-  byte sequence[BUFFER_SIZE];
-  int length;
+typedef enum btnPrs {
+  none,
+  left,
+  right
 };
 
-RX_Sequence sequence;
+typedef struct TransmissionStruct {
+  int button_press;
+  double battery_voltage;
+};
+
+typedef enum : uint8_t
+{
+  GYRO_PREC_250 = 0,
+  GYRO_PREC_500,
+  GYRO_PREC_1000,
+  GYRO_PREC_2000
+} gyro_precision_e;
+typedef enum : uint8_t
+{
+  ACCEL_PREC_2 = 0,
+  ACCEL_PREC_4,
+  ACCEL_PREC_8,
+  ACCEL_PREC_16
+} accel_precision_e;
+
+
+
+TransmissionStruct packet;
 
 //debouncing counters
 int dbLS = 0;
 int dbC = 0;
-SoftwareSerial mySerial (rX_Ard, tX_Ard);
+
+
+
+
+// This function must be able to toggle sleep mode for the MPU6050
+void setSleep(bool enable) {
+  Wire.beginTransmission(MPUAddr);
+  Wire.write(0x6B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPUAddr, 1, true);
+  uint8_t power = Wire.read(); // read 0x6B
+  power &= ~(1 << 6);
+  power |= (power ? 1 : 0) << 6;
+
+  Wire.beginTransmission(MPUAddr);
+  Wire.write(0x6B);
+  Wire.write(power);
+  Wire.endTransmission(true);
+}
+
+void read3_16Bits( int a_h, int16_t* ax, int b_h, int16_t* bx, int c_h, int16_t* cx) {
+
+  for (int j = 0; j < 3; j++) {
+    for (int i = 0; i < 2; i++) {
+
+      int address;
+      int16_t* value;
+
+      if (j == 0) {
+        address = a_h;
+        value = ax;
+      } else if (j == 1) {
+        address = b_h;
+        value = bx;
+      } else if (j == 2) {
+        address = c_h;
+        value = cx;
+      }
+
+      Wire.beginTransmission(MPUAddr);
+      Wire.write(address + i);
+      bool lastTransmission = (i == 1 && j == 2);
+      Wire.endTransmission(lastTransmission);
+      Wire.requestFrom(MPUAddr, 1, true);
+      *(((int8_t *) value) + i) = Wire.read(); // read 0x6B
+    }
+  }
+}
+
+// This function needs to return by reference the accelerometer values stored in the accelerometer registers. 
+void getAccelData( int16_t* ax,int16_t* ay, int16_t* az) {
+  read3_16Bits(
+    0x3B, ax,
+    0x3D, ay,
+    0x3F, az
+  );
+}
+
+// This function needs to return by reference the gyroscope values stored in the accelerometer registers. 
+void getGyroData( int16_t* gx,int16_t* gy, int16_t* gz) {
+  read3_16Bits(
+    0x43, gx,
+    0x45, gy,
+    0x47, gz
+  );
+}
+
+// This function needs to set the precision bits for the gyroscope to val (refer to the lecture slides)
+void setGyroPrec(gyro_precision_e prec) {
+  Wire.beginTransmission(MPUAddr);
+  Wire.write(0x1B);
+  Wire.write((0b11 & prec) << 3);
+  Wire.endTransmission(true);
+}
+
+// This function needs to set the precision bits for the accelerometer to val (refer to the lecture slides)
+void setAccelPrec(accel_precision_e prec) {
+  Wire.beginTransmission(MPUAddr);
+  Wire.write(0x1C);
+  Wire.write((0b11 & prec) << 3);
+  Wire.endTransmission(true);
+
+}
+
+
+
+
+
+
 
 // the setup routine runs once when you press reset:
 void setup() {
   // initialize serial communication at 9600 bits per second:
   Serial.begin(9600);
-  // make the pushbutton's pin an input:
-  pinMode(pBY, INPUT);
-  pinMode(pBG, INPUT);
-  pinMode(pBR, INPUT);
+  Wire.Begin();
 
-  Serial.println("shouldn't be trash\n");
+  pinMode(button_left, INPUT);
+  pinMode(button_right, INPUT);
 
-  //do the software buttons crap
-  pinMode(rX_Ard, INPUT);
-  pinMode(tX_Ard, OUTPUT);
+  pinMode(battery_pin, INPUT);
+
+//  pinMode(rX_Ard, INPUT);
+//  pinMode(tX_Ard, OUTPUT);
   // mySerial.begin(9600);
 
   // 0 the sequence buffer
-  memset(&sequence, 0, sizeof(sequence));
+  memset(&packet, 0, sizeof(packet));
 
 
   printf_begin();
@@ -87,22 +195,21 @@ void setup() {
 }
 
 
-int parseInput() {
+btnPrs parseInput() {
   while (true){
     //Serial.print("last pressed: ");Serial.println(dbLS);
     //Serial.print("counter: "); Serial.println(dbC);
-    int bs1 = digitalRead(pBY);
-    int bs2 = digitalRead(pBG);
-    int bs3 = digitalRead(pBR);
+    int bs1 = digitalRead(button_left);
+    int bs2 = digitalRead(button_right);
     
     delay(2);
     if (bs1 == 1){
-      //Serial.println("pressed yellow");
+      //Serial.println("pressed left");
       if (dbLS == 1){
         dbC++;
         if (dbC == DEBOUNCE_CONSTANT){
           dbC = 0;
-          return yellow;  
+          return left;  
         }
       }
       else {
@@ -112,12 +219,12 @@ int parseInput() {
     }
 
     else if (bs2 == 1){
-      //Serial.println("pressed green");
+      //Serial.println("pressed right");
       if (dbLS == 2){
         dbC++;
         if (dbC == DEBOUNCE_CONSTANT){
           dbC = 0;
-          return green;  
+          return right;  
         }
       }
       else {
@@ -126,20 +233,6 @@ int parseInput() {
       }  
     }
 
-    else if (bs3 == 1){
-      //Serial.println("pressed red");
-      if (dbLS == 3){
-        dbC++;
-        if (dbC == DEBOUNCE_CONSTANT){
-          dbC = 0;
-          return red;  
-        }
-      }
-      else {
-        dbLS = 3;
-        dbC = 0;  
-      }  
-    }
     else{
       if (dbLS == 0){
         dbC++;
@@ -154,43 +247,16 @@ int parseInput() {
       }  
     }
   }
-}
 
-// returns true if the user inputs match the sequence
-bool checkSequence(RX_Sequence inputSequence) {
-  int lastState = 0;
-  int currentState = 0;
-  int i;
-
-  for (int k = 0; inputSequence.sequence[k] != none && k < BUFFER_SIZE; k++)
-    Serial.print(inputSequence.sequence[k]);
-  Serial.println("");
-
-  for (i = 0; i < BUFFER_SIZE && inputSequence.sequence[i] != none; i++) {
-    // only breaks when there is a new input
-    while (currentState == 0 || currentState == lastState) {
-      currentState = parseInput();
-
-      if (currentState == 0) {
-        lastState = currentState;
-        digitalWrite(13, LOW);
-      } else {
-        digitalWrite(13, HIGH);
-      }
-    }
-    lastState = currentState;
-
-    Serial.print("total length: "); Serial.println(i);
-    if (currentState != inputSequence.sequence[i]) {
-      return false;
-    }
-  }
-
-  return true;
+  return none;
 }
 
 // the loop routine runs over and over again forever:
 void loop() {
+
+
+  double vOut = analogRead(battery_pin)*logic_level/1023;
+  double vBattery = vOut*(r1+r2)/r2;
 
   // read the input pin:
   //int currentState = parseInput();
@@ -198,23 +264,28 @@ void loop() {
   //Serial.print(digitalRead(pBY));
 
 
-  radio.startListening();
+//  radio.startListening();
   // will be high when waiting for a sequence
-  digitalWrite(13, HIGH);
-  sequence.length = 0;
+  // digitalWrite(13, HIGH);
+  // sequence.length = 0;
   
-  Serial.println("waiting for input");
-  while (sequence.length == 0) {
-    if (radio.available()) {
-      radio.read(&sequence, sizeof(RX_Sequence));
-    }
-  }
+  // Serial.println("waiting for input");
+  // while (sequence.length == 0) {
+  //   if (radio.available()) {
+  //     radio.read(&sequence, sizeof(RX_Sequence));
+  //   }
+  // }
 
-  // will be low when waiting for a button press (but will turn on for registered button presses)
-  digitalWrite(13, LOW);
-  bool correctSequence = checkSequence(sequence);
+  // // will be low when waiting for a button press (but will turn on for registered button presses)
+  // digitalWrite(13, LOW);
 
-  digitalWrite(13, HIGH);
-  radio.stopListening();    
-  radio.write(&correctSequence, sizeof(byte));
+  // digitalWrite(13, HIGH);
+  
+  packet.button_press = parseInput();
+  packet.battery_voltage = vBattery; 
+
+  // radio.stopListening();    
+  radio.write(&packet, sizeof(TransmissionStruct));
 }
+
+

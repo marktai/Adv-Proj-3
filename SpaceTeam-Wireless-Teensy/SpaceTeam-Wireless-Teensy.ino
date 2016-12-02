@@ -21,6 +21,20 @@ typedef enum color {
   red
 };
 
+typedef enum btnPrs {
+  b_none,
+  b_left,
+  b_right
+};
+
+typedef struct TransmissionStruct {
+  int button_press;
+  double battery_voltage;
+};
+
+
+TransmissionStruct packet;
+
 
 // digital pin 2 has a pushbutton attached to it. Give it a name:
 int ledY = 19;
@@ -133,64 +147,47 @@ void displaySequence(RX_Sequence sequence) {
   }
 }
 
-void displayCorrectness(bool correct) {
+void displayBatteryLevel(double battery_voltage) {
   setAllLow();
-  byte showColor;
-  if (correct) {
+  color showColor;
+  if (battery_voltage >= 3.9) {
     showColor = green;
+  } else if (battery_voltage >= 3.7) {
+    showColor = yellow;
   } else {
     showColor = red;
   }
-  for (int i = 0; i < 10; i++){
-    setColorHigh(showColor);
-    delay(100);
 
-    setColorLow(showColor);
-    delay(100);
-  }
-  delay(500);
+  setColorHigh(showColor);
 }
 
 
 // the loop routine runs over and over again forever:
 void loop() {
-  if (addColor(sequence)) {
-    Serial.print("addColor error");
-    
-  }
-  Serial.print("The sequence is ");
-  for (int i = 0; i < sequence.len; i++){
-    Serial.print(sequence.sequence[i]);
-  }
-  Serial.println("");
-  Serial.print("The length is ");
-  Serial.println(sequence.len);
-  Serial.print("RX_Sequence length is ");
-  Serial.print(sizeof(RX_Sequence));
-  displaySequence(sequence);
-  radio.stopListening();
-  Serial.println(" waiting to write");
-  radio.write(&sequence, sizeof(RX_Sequence));
+  
+  // radio.stopListening();
+  // Serial.println(" waiting to write");
+  // radio.write(&sequence, sizeof(RX_Sequence));
 
   // will be high when waiting for a response
   radio.startListening();
   digitalWrite(13, HIGH);
-  byte correctSequence = 3;
+  packet.button_press = 5;
   Serial.println("before loop");
-  while (correctSequence == 3) {
+  while (packet.button_press == 5) {
     if (radio.available()) {
-      radio.read(&correctSequence, sizeof(byte));
+      radio.read(&packet, sizeof(TransmissionStruct));
     }
   }
-  if (correctSequence == 1) Serial.println("CORRECT");
-  else { Serial.println("INCORRECT"); delay(1000); }
-  
-  displayCorrectness(correctSequence);
 
-  if (correctSequence != 1) {
-    memset(&sequence, 0, sizeof(RX_Sequence));
-    sequence.len = 0;
-  }
+
+  digitalWrite(13, LOW);
+
+  printf("Button press: %d, Battery Voltage: %f", packet.button_press, packet.battery_voltage);
+  displayBatteryLevel(packet.battery_voltage);
+
+
+
 
   delay(1);        // delay in between reads for stability
 }
