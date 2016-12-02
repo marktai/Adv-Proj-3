@@ -8,10 +8,10 @@
 #include "printf.h"
 #define DEBOUNCE_CONSTANT 10
 #define BUFFER_SIZE 128
+#define MPUAddr 1
 
 #include <SPI.h>
 #include "RF24.h"
-#include <Wire.h>
 
 
 int battery_pin = A1;
@@ -33,8 +33,6 @@ byte addresses[][6] = {"1Node","2Node"};
 int button_left = 4;
 int button_right = 6;
 
-
-
 typedef enum btnPrs {
   none,
   left,
@@ -46,21 +44,6 @@ typedef struct TransmissionStruct {
   double battery_voltage;
 };
 
-typedef enum : uint8_t
-{
-  GYRO_PREC_250 = 0,
-  GYRO_PREC_500,
-  GYRO_PREC_1000,
-  GYRO_PREC_2000
-} gyro_precision_e;
-typedef enum : uint8_t
-{
-  ACCEL_PREC_2 = 0,
-  ACCEL_PREC_4,
-  ACCEL_PREC_8,
-  ACCEL_PREC_16
-} accel_precision_e;
-
 
 
 TransmissionStruct packet;
@@ -69,100 +52,10 @@ TransmissionStruct packet;
 int dbLS = 0;
 int dbC = 0;
 
-
-
-
-// This function must be able to toggle sleep mode for the MPU6050
-void setSleep(bool enable) {
-  Wire.beginTransmission(MPUAddr);
-  Wire.write(0x6B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPUAddr, 1, true);
-  uint8_t power = Wire.read(); // read 0x6B
-  power &= ~(1 << 6);
-  power |= (power ? 1 : 0) << 6;
-
-  Wire.beginTransmission(MPUAddr);
-  Wire.write(0x6B);
-  Wire.write(power);
-  Wire.endTransmission(true);
-}
-
-void read3_16Bits( int a_h, int16_t* ax, int b_h, int16_t* bx, int c_h, int16_t* cx) {
-
-  for (int j = 0; j < 3; j++) {
-    for (int i = 0; i < 2; i++) {
-
-      int address;
-      int16_t* value;
-
-      if (j == 0) {
-        address = a_h;
-        value = ax;
-      } else if (j == 1) {
-        address = b_h;
-        value = bx;
-      } else if (j == 2) {
-        address = c_h;
-        value = cx;
-      }
-
-      Wire.beginTransmission(MPUAddr);
-      Wire.write(address + i);
-      bool lastTransmission = (i == 1 && j == 2);
-      Wire.endTransmission(lastTransmission);
-      Wire.requestFrom(MPUAddr, 1, true);
-      *(((int8_t *) value) + i) = Wire.read(); // read 0x6B
-    }
-  }
-}
-
-// This function needs to return by reference the accelerometer values stored in the accelerometer registers. 
-void getAccelData( int16_t* ax,int16_t* ay, int16_t* az) {
-  read3_16Bits(
-    0x3B, ax,
-    0x3D, ay,
-    0x3F, az
-  );
-}
-
-// This function needs to return by reference the gyroscope values stored in the accelerometer registers. 
-void getGyroData( int16_t* gx,int16_t* gy, int16_t* gz) {
-  read3_16Bits(
-    0x43, gx,
-    0x45, gy,
-    0x47, gz
-  );
-}
-
-// This function needs to set the precision bits for the gyroscope to val (refer to the lecture slides)
-void setGyroPrec(gyro_precision_e prec) {
-  Wire.beginTransmission(MPUAddr);
-  Wire.write(0x1B);
-  Wire.write((0b11 & prec) << 3);
-  Wire.endTransmission(true);
-}
-
-// This function needs to set the precision bits for the accelerometer to val (refer to the lecture slides)
-void setAccelPrec(accel_precision_e prec) {
-  Wire.beginTransmission(MPUAddr);
-  Wire.write(0x1C);
-  Wire.write((0b11 & prec) << 3);
-  Wire.endTransmission(true);
-
-}
-
-
-
-
-
-
-
 // the setup routine runs once when you press reset:
 void setup() {
   // initialize serial communication at 9600 bits per second:
   Serial.begin(9600);
-  Wire.Begin();
 
   pinMode(button_left, INPUT);
   pinMode(button_right, INPUT);
@@ -287,5 +180,3 @@ void loop() {
   // radio.stopListening();    
   radio.write(&packet, sizeof(TransmissionStruct));
 }
-
-
