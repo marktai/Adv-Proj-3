@@ -15,12 +15,12 @@
 #include <Wire.h>
 
 
-int battery_pin = A1;
+int battery_pin = A3;
 
-#define r1 326
-#define r2 1176
+#define r1 1437
+#define r2 5321 
 
-#define logic_level 3.486
+#define logic_level 3.297
 
 
 
@@ -316,6 +316,7 @@ void loop() {
 
   double vOut = analogRead(battery_pin)*logic_level/1023;
   double vBattery = vOut*(r1+r2)/r2;
+  Serial.println(vBattery);
 
 
   digitalWrite(13, HIGH);
@@ -327,14 +328,14 @@ void loop() {
   getAccelData(&packet.a_x, &packet.a_y, &packet.a_z);
   getGyroData(&packet.g_x, &packet.g_y, &packet.g_z);
 
-  printPacket(packet);
+  //printPacket(packet);
 
 
   digitalWrite(13, LOW);
   radio.stopListening();    
   radio.write(&packet, sizeof(TransmissionStruct));
   radio.startListening();
-  delay(200);
+  delay(20);
 }
 
 

@@ -14,6 +14,14 @@ byte addresses[][6] = {"1Node","2Node"};
 
 #define BUFFER_SIZE 127
 
+const double range = 32768.0;
+const double init_a_x = 0.016479;
+const double init_a_y = 0.003052;
+const double init_a_z = 0.533203;
+
+const int period = 12;
+int count = 0;
+
 typedef enum color {
   none,
   yellow,
@@ -72,6 +80,7 @@ int OFF_DURATION = 500;
 void setup() {
   // initialize serial communication at 9600 bits per second:
   Serial.begin(9600);
+  Mouse.screenSize(1366, 768);  // configure screen size
 //  Serial2.begin(9600);
   // make the pushbutton's pin an input:
   pinMode(ledY, OUTPUT);
@@ -96,7 +105,7 @@ void setup() {
   
   // Start the radio listening for data
   radio.startListening();
-  delay(7000);
+  delay(1000);
   radio.printDetails();
 
 
@@ -180,22 +189,39 @@ void printPacket(TransmissionStruct packet) {
   Serial.print("; Battery: ");
   Serial.print((int) packet.battery_level);
 
-  Serial.print("; Accel: ");
+  /*Serial.print("; Accel: ");
   Serial.print(packet.a_x); 
   Serial.print(", ");
   Serial.print(packet.a_y); 
   Serial.print(", ");
-  Serial.print(packet.a_z); 
+  Serial.print(packet.a_z); */
+//  printf("; Accel: %f, %f, %f,", packet.a_x/32768.0, packet.a_y/32768.0, packet.a_z/32768.0);
 
+  /*
   Serial.print("; Gyro: ");
   Serial.print(packet.g_x); 
   Serial.print(", ");
   Serial.print(packet.g_y); 
   Serial.print(", ");
   Serial.print(packet.g_z); 
+  */
 
   Serial.println("");
 }
+
+void moveMouse(TransmissionStruct packet) {
+  
+  double a_x = (packet.a_x - init_a_x)/range;
+  double a_y = (packet.a_y - init_a_y)/range;
+  double a_z = (packet.a_z - init_a_z)/range;
+
+  printf("Accel: %f, %f, %f\n", a_x, a_y, a_z);
+
+  Mouse.move((int) -70*a_y, (int) -70*a_x);
+  Mouse.set_buttons(packet.button_press == b_left, 0, packet.button_press  == b_right);
+  
+}
+
 
 // the loop routine runs over and over again forever:
 void loop() {
@@ -212,17 +238,34 @@ void loop() {
   while (packet.button_press == 5) {
     if (radio.available()) {
       radio.read(&packet, sizeof(TransmissionStruct));
+//        packet.button_press = 0;
+//        packet.battery_level = 2;
+//        packet.a_x = 15232;
+//        packet.a_y = 1000;
+//        packet.a_z = -20000;
     }
   }
   printPacket(packet);
-
+  displayBatteryLevel(packet.battery_level);
+  moveMouse(packet);
 
   digitalWrite(13, LOW);
-
-
-
-
-  delay(1);        // delay in between reads for stability
+//
+//  if (count >= period) {
+//    count = count % period;
+//  }
+//
+//  if (0 <= count && count < period/4) {
+//    Mouse.move(2,0);
+//  } else if (count < period/2) {
+//    Mouse.move(0,2);
+//  } else if (count < 3* period/4) {
+//    Mouse.move(-2,0);
+//  } else {
+//    Mouse.move(0,-2);
+//  }
+//
+//  count += 1;
 }
 
 
